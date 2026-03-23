@@ -32,8 +32,16 @@ A touch-friendly signal flow diagrammer for audio/video rigs. Built for pub kara
 
 **Zoom** — pinch, scroll wheel, or tap the % badge for presets
 
+## Persistence
+
+Your layout auto-saves to `localStorage` in the browser — it'll be there when you return. Use **↓ JSON** to export a backup or share your rig, and **↑ JSON** to restore it.
+
+The `default-rig.json` in this repo is Wolf's current rig. If you've visited before and have a saved layout, a banner will appear when Wolf pushes an updated version — you can load it or dismiss and keep your own.
+
+## Make it yours
+
+Fork this repo, replace `default-rig.json` with your own exported layout, and enable GitHub Pages — you'll have a shareable diagram of your own AV rig at `https://your-username.github.io/sigflow/`.
+
 ## Deployment
 
 The app is a single HTML file with no build step. GitHub Pages serves it from the `main` branch root.
-
-`default-rig.json` is Wolf's current rig layout. Visiting users with a saved local state will see an update banner when this file's `version` field changes.
