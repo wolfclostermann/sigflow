@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Signal Flow</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@500;700&display=swap');
+:root {
+  --bg:#0d0f14; --panel:#13161e; --border:#252a38; --muted:#3a4055;
+  --accent:#00e5ff; --accent2:#ff6b35; --accent3:#7fff6e;
+  --text:#c8d0e8; --dim:#5a6280;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{width:100%;height:100dvh;overflow:hidden;background:var(--bg);
+  font-family:'Barlow Condensed',sans-serif;color:var(--text);
+  touch-action:none;user-select:none;}
+body{display:flex;flex-direction:column;}
+
+/* header */
+header{display:flex;align-items:center;gap:8px;padding:9px 12px;
+  background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;z-index:50;}
+header h1{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--accent);
+  letter-spacing:2px;flex:1;}
+header h1 em{color:var(--dim);font-style:normal;}
+.hbtn{background:var(--border);border:1px solid var(--muted);color:var(--text);
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;font-weight:700;
+  letter-spacing:1px;padding:5px 10px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+.hbtn.danger{border-color:#7f1d1d;color:#f87171;}
+
+/* viewport */
+#vp{flex:1;position:relative;overflow:hidden;cursor:grab;}
+#vp.panning{cursor:grabbing;}
+
+/* dot grid — redrawn on a <canvas> element for reliability */
+#grid-canvas{position:absolute;inset:0;pointer-events:none;z-index:0;}
+
+/* infinite canvas */
+#ic{position:absolute;top:0;left:0;width:4000px;height:3200px;
+  transform-origin:0 0;z-index:1;}
+
+/* svg */
+#svg{position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;overflow:visible;z-index:2;}
+
+/* nodes */
+.node{position:absolute;width:180px;background:var(--panel);
+  border:1px solid var(--border);border-radius:6px;z-index:10;cursor:grab;}
+.node.src{border-color:var(--accent2);box-shadow:0 0 0 1px var(--accent2),0 0 18px rgba(255,107,53,.2);}
+.nh{padding:8px 10px 6px;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:7px;}
+.ni{font-size:18px;line-height:1;flex-shrink:0;}
+.nl{font-size:13px;font-weight:700;letter-spacing:.4px;flex:1;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.ns{font-family:'Share Tech Mono',monospace;font-size:9px;color:var(--dim);
+  padding:4px 10px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.nimg{height:100%;width:auto;display:block;background:var(--bg);}
+.nimg-wrap{position:relative;width:100%;display:flex;justify-content:center;overflow:hidden;
+  border-top:1px solid var(--border);border-radius:0 0 5px 5px;
+  background:var(--bg);}
+.nimg-handle{position:absolute;bottom:0;right:0;width:22px;height:22px;
+  cursor:ns-resize;z-index:30;display:flex;align-items:flex-end;justify-content:flex-end;
+  padding:3px;}
+.nimg-handle::after{content:'';display:block;width:10px;height:10px;
+  border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);
+  border-radius:0 0 3px 0;}
+.node[data-c="audio"]  {border-left:3px solid var(--accent2);}
+.node[data-c="video"]  {border-left:3px solid var(--accent);}
+.node[data-c="compute"]{border-left:3px solid var(--accent3);}
+.node[data-c="network"]{border-left:3px solid #a78bfa;}
+.node[data-c="camera"] {border-left:3px solid #facc15;}
+.node[data-c="output"] {border-left:3px solid #f472b6;}
+
+/* ports */
+.port{position:absolute;width:16px;height:16px;background:var(--muted);
+  border:2px solid var(--bg);border-radius:50%;z-index:20;cursor:crosshair;}
+.port.po{right:-9px;top:50%;transform:translateY(-50%);}
+.port.pi{left:-9px;top:50%;transform:translateY(-50%);}
+
+/* connections */
+.cl{fill:none;stroke-width:2.5;stroke-linecap:round;pointer-events:stroke;cursor:pointer;}
+.cl.audio {stroke:rgba(255,107,53,.6);}
+.cl.video {stroke:rgba(0,229,255,.55);}
+.cl.compute,
+.cl.network{stroke:rgba(167,139,250,.55);}
+.cl.camera {stroke:rgba(250,204,21,.55);}
+.cl.output {stroke:rgba(244,114,182,.55);}
+.cl.def    {stroke:rgba(58,64,85,.8);}
+.cprev{fill:none;stroke:var(--accent);stroke-width:2;stroke-dasharray:8 5;pointer-events:none;}
+.ctxt{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;
+  pointer-events:none;opacity:0.9;}
+
+/* palette */
+#pal{position:fixed;bottom:0;left:0;right:0;background:var(--panel);
+  border-top:1px solid var(--border);z-index:50;}
+#ptog{display:flex;align-items:center;padding:9px 14px;gap:8px;cursor:pointer;}
+#ptog span:first-child{font-family:'Share Tech Mono',monospace;font-size:11px;
+  color:var(--accent);letter-spacing:2px;flex:1;}
+#parr{color:var(--dim);font-size:11px;transition:transform .2s;}
+#pal.open #parr{transform:rotate(180deg);}
+#pgrid{display:none;flex-wrap:wrap;gap:6px;padding:8px 12px 14px;
+  overflow-y:auto;max-height:180px;}
+#pal.open #pgrid{display:flex;}
+.pi-item{display:flex;align-items:center;gap:6px;background:var(--bg);
+  border:1px solid var(--border);border-radius:5px;padding:7px 11px;
+  font-size:13px;font-weight:500;cursor:pointer;flex-shrink:0;}
+.pi-item:active{background:var(--border);}
+.dot{width:8px;height:8px;border-radius:50%;}
+
+/* overlays */
+#fit-btn{position:fixed;top:50px;left:10px;font-family:'Share Tech Mono',monospace;
+  font-size:10px;background:var(--panel);border:1px solid var(--border);
+  border-radius:4px;color:var(--accent);padding:5px 10px;z-index:40;cursor:pointer;
+  letter-spacing:1px;}
+#zbadge{position:fixed;top:50px;right:10px;font-family:'Share Tech Mono',monospace;
+  font-size:10px;color:var(--accent);background:var(--panel);border:1px solid var(--border);
+  border-radius:4px;padding:4px 8px;z-index:40;cursor:pointer;letter-spacing:1px;
+  user-select:none;}
+#zbadge:hover{border-color:var(--accent);}
+#zdrop{position:fixed;top:74px;right:10px;background:var(--panel);
+  border:1px solid var(--border);border-radius:6px;z-index:200;display:none;
+  min-width:88px;box-shadow:0 8px 24px rgba(0,0,0,.6);
+  font-family:'Share Tech Mono',monospace;font-size:10px;overflow:hidden;}
+#zdrop.on{display:block;}
+.zopt{padding:8px 14px;cursor:pointer;color:var(--dim);letter-spacing:1px;}
+.zopt:hover,.zopt.cur{color:var(--accent);background:var(--border);}
+#legend{position:fixed;top:82px;left:10px;background:var(--panel);
+  border:1px solid var(--border);border-radius:6px;padding:7px 11px;z-index:40;
+  font-size:9px;font-family:'Share Tech Mono',monospace;line-height:2;color:var(--dim);}
+.lr{display:flex;align-items:center;gap:5px;}
+.ld{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+
+/* context menu */
+#ctx{position:fixed;background:var(--panel);border:1px solid var(--border);
+  border-radius:6px;z-index:200;min-width:160px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);display:none;}
+#ctx.on{display:block;}
+.ci{padding:10px 14px;font-size:13px;font-weight:500;cursor:pointer;letter-spacing:.3px;}
+.ci:active{background:var(--border);}
+.ci.del{color:#f87171;}
+.cs{height:1px;background:var(--border);}
+
+/* edit modal */
+#emod{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:300;
+  display:none;align-items:center;justify-content:center;}
+#emod.on{display:flex;}
+#ebox{background:var(--panel);border:1px solid var(--accent);border-radius:8px;
+  padding:20px;width:min(320px,90vw);box-shadow:0 0 40px rgba(0,229,255,.12);}
+#ebox h3{font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--accent);
+  letter-spacing:2px;margin-bottom:14px;}
+#ebox label{font-size:10px;font-weight:700;letter-spacing:1px;color:var(--dim);
+  display:block;margin-bottom:4px;margin-top:10px;}
+#ebox input,#ebox select{width:100%;background:var(--bg);border:1px solid var(--border);
+  border-radius:4px;color:var(--text);font-family:'Share Tech Mono',monospace;
+  font-size:12px;padding:7px 10px;}
+#ebox input:focus,#ebox select:focus{outline:none;border-color:var(--accent);}
+.mbtns{display:flex;gap:8px;margin-top:16px;}
+.mbtns button{flex:1;padding:9px;border-radius:4px;
+  font-family:'Barlow Condensed',sans-serif;font-size:13px;font-weight:700;
+  letter-spacing:1px;cursor:pointer;border:none;}
+.msave{background:var(--accent);color:#000;}
+.mcanc{background:var(--border);color:var(--text);}
+.icon-opt{font-size:20px;padding:5px 7px;border-radius:5px;cursor:pointer;
+  border:2px solid transparent;background:var(--bg);line-height:1;transition:border-color .1s;}
+.icon-opt.sel{border-color:var(--accent);background:rgba(0,229,255,.08);}
+.icon-opt:active{border-color:var(--accent2);}
+
+/* update banner */
+#update-banner{position:fixed;top:44px;left:0;right:0;
+  background:rgba(0,229,255,.1);border-bottom:1px solid var(--accent);
+  display:none;align-items:center;gap:10px;padding:7px 14px;z-index:80;
+  font-family:'Share Tech Mono',monospace;font-size:10px;color:var(--accent);
+  letter-spacing:1px;}
+#update-banner.show{display:flex;}
+#update-msg{flex:1;}
+#update-yes,#update-no{background:transparent;border:1px solid var(--accent);
+  color:var(--accent);font-family:'Share Tech Mono',monospace;font-size:10px;
+  padding:3px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px;}
+#update-no{border-color:var(--dim);color:var(--dim);}
+
+/* save badge */
+#save-badge{position:fixed;bottom:52px;right:10px;font-family:'Share Tech Mono',monospace;
+  font-size:9px;color:var(--accent3);background:var(--panel);border:1px solid var(--accent3);
+  border-radius:4px;padding:3px 8px;z-index:40;opacity:0;transition:opacity .4s;
+  pointer-events:none;}
+#save-badge.show{opacity:1;}
+
+/* connect hint */
+#chint{position:fixed;bottom:52px;left:50%;transform:translateX(-50%);
+  background:rgba(255,107,53,.1);border:1px solid var(--accent2);
+  color:var(--accent2);font-family:'Share Tech Mono',monospace;font-size:10px;
+  letter-spacing:1px;padding:6px 16px;border-radius:20px;z-index:150;
+  display:none;pointer-events:none;white-space:nowrap;}
+#chint.on{display:block;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SIG<em>/</em>FLOW <em>// karaoke · stream</em></h1>
+  <button class="hbtn" id="bpreset">Load Rig</button>
+  <button class="hbtn" id="bsave">↓ JSON</button>
+  <button class="hbtn" id="bload">↑ JSON</button>
+  <input type="file" id="file-input" accept=".json" style="display:none">
+  <button class="hbtn" id="bpng">↓ PNG</button>
+  <button class="hbtn" id="bpdf">↓ PDF</button>
+  <button class="hbtn" id="bclconn">Clear Lines</button>
+  <button class="hbtn danger" id="bclall">Reset</button>
+</header>
+<div id="save-badge"></div>
+<div id="update-banner">
+  <span id="update-msg">New version available from author</span>
+  <button id="update-yes">Update</button>
+  <button id="update-no">Dismiss</button>
+</div>
+
+<div id="vp">
+  <canvas id="grid-canvas"></canvas>
+  <div id="ic">
+    <svg id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+</div>
+
+<button id="fit-btn">⊡ FIT</button>
+<div id="zbadge">100% ▾</div>
+<div id="zdrop">
+  <div class="zopt" data-z="0.5">50%</div>
+  <div class="zopt" data-z="0.75">75%</div>
+  <div class="zopt" data-z="1">100%</div>
+  <div class="zopt" data-z="1.25">125%</div>
+  <div class="zopt" data-z="1.5">150%</div>
+  <div class="zopt" data-z="2">200%</div>
+  <div class="zopt" data-z="fit">FIT ALL</div>
+</div>
+<div id="legend">
+  <div class="lr"><div class="ld" style="background:#ff6b35"></div>AUDIO</div>
+  <div class="lr"><div class="ld" style="background:#00e5ff"></div>VIDEO</div>
+  <div class="lr"><div class="ld" style="background:#7fff6e"></div>COMPUTE</div>
+  <div class="lr"><div class="ld" style="background:#a78bfa"></div>NETWORK</div>
+  <div class="lr"><div class="ld" style="background:#facc15"></div>CAMERA</div>
+  <div class="lr"><div class="ld" style="background:#f472b6"></div>OUTPUT</div>
+</div>
+
+<div id="pal">
+  <div id="ptog"><span>+ ADD DEVICE</span><span id="parr">▲</span></div>
+  <div id="pgrid"></div>
+</div>
+
+<div id="ctx">
+  <div class="ci" id="cedit">✏️ &nbsp;Edit label</div>
+  <div class="cs"></div>
+  <div class="ci" id="cconn">🔗 &nbsp;Connect from here</div>
+  <div class="cs"></div>
+  <div class="ci del" id="cdel">🗑 &nbsp;Delete node</div>
+</div>
+
+<div id="emod">
+  <div id="ebox">
+    <h3>EDIT NODE</h3>
+    <label>ICON</label>
+    <div id="icon-grid" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;"></div>
+    <label>LABEL</label><input id="elabel" maxlength="28">
+    <label>DETAIL</label><input id="esub" maxlength="36">
+    <label>CATEGORY</label>
+    <select id="ecat">
+      <option value="audio">Audio</option>
+      <option value="video">Video</option>
+      <option value="compute">Compute</option>
+      <option value="network">Network</option>
+      <option value="camera">Camera</option>
+      <option value="output">Output</option>
+    </select>
+    <label>PHOTO</label>
+    <div id="img-preview-wrap" style="position:relative;margin-bottom:4px;">
+      <img id="img-preview" style="width:100%;max-height:150px;object-fit:contain;border-radius:4px;
+        border:1px solid var(--border);display:none;background:var(--bg);">
+      <div id="img-none" style="height:36px;display:flex;align-items:center;justify-content:center;
+        border:1px dashed var(--muted);border-radius:4px;font-family:'Share Tech Mono',monospace;
+        font-size:9px;color:var(--dim);">NO PHOTO</div>
+    </div>
+    <div style="display:flex;gap:6px;">
+      <button class="mcanc" id="eimg-pick" style="flex:1;padding:6px;font-size:11px;">📷 UPLOAD</button>
+      <button class="mcanc" id="eimg-clear" style="padding:6px 10px;font-size:11px;">✕</button>
+    </div>
+    <input type="file" id="img-file-input" accept="image/*" style="display:none">
+    <div class="mbtns">
+      <button class="msave" id="esave">SAVE</button>
+      <button class="mcanc" id="ecanc">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<div id="chint">TAP a node to complete — TAP blank to cancel</div>
+
+<script>
+// ─── DOM refs ───────────────────────────────────────────────
+const vp       = document.getElementById('vp');
+const ic       = document.getElementById('ic');
+const svg      = document.getElementById('svg');
+const gc       = document.getElementById('grid-canvas');
+const zbadge   = document.getElementById('zbadge');
+const chint    = document.getElementById('chint');
+const ctx      = document.getElementById('ctx');
+const emod     = document.getElementById('emod');
+const pal      = document.getElementById('pal');
+
+// ─── Transform state ───────────────────────────────────────
+let tx = 0, ty = 0, sc = 1;
+const MIN_SC = 0.12, MAX_SC = 3;
+
+function applyTx() {
+  ic.style.transform = `translate(${tx}px,${ty}px) scale(${sc})`;
+  zbadge.textContent = Math.round(sc * 100) + '% ▾';
+  drawGrid();
+}
+
+// Draw dot grid on a <canvas> so it pans/zooms correctly
+function drawGrid() {
+  const W = vp.clientWidth, H = vp.clientHeight;
+  gc.width = W; gc.height = H;
+  const g = gc.getContext('2d');
+  g.clearRect(0,0,W,H);
+  const step = 32 * sc;
+  const ox = ((tx % step) + step) % step;
+  const oy = ((ty % step) + step) % step;
+  g.fillStyle = '#252a38';
+  for (let x = ox; x < W; x += step)
+    for (let y = oy; y < H; y += step)
+      g.fillRect(x-1, y-1, 2, 2);
+}
+
+function screenToCanvas(sx, sy) {
+  const r = vp.getBoundingClientRect();
+  return { x: (sx - r.left - tx) / sc, y: (sy - r.top - ty) / sc };
+}
+
+// ─── Pan / Pinch ────────────────────────────────────────────
+// We track ALL pointer events at the document level so nothing
+// can accidentally swallow them.
+
+const ptrs = new Map(); // pointerId → {x,y}
+let panPtr = null;      // pointerId being used to pan
+let panOrigin = null;   // {px,py,tx0,ty0}
+let pinch = null;       // pinch state
+
+function ptrDist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function ptrMid(a,b){ return {x:(a.x+b.x)/2, y:(a.y+b.y)/2}; }
+
+// Intercept at document so nothing blocks it
+document.addEventListener('pointerdown', onDown);
+document.addEventListener('pointermove', onMove);
+document.addEventListener('pointerup',   onUp);
+document.addEventListener('pointercancel', onUp);
+
+function isCanvasBg(el) {
+  return el === vp || el === ic || el === svg || el === gc;
+}
+
+function onDown(e) {
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+
+  if (ptrs.size === 2) {
+    // Start pinch — cancel any pan
+    panPtr = null; panOrigin = null;
+    const pts = [...ptrs.values()];
+    pinch = {
+      d0: ptrDist(pts[0],pts[1]),
+      sc0: sc, tx0: tx, ty0: ty,
+      mid0: ptrMid(pts[0],pts[1])
+    };
+    return;
+  }
+
+  // Single pointer on blank canvas → pan
+  if (ptrs.size === 1 && isCanvasBg(e.target)) {
+    if (connecting) { cancelConn(); return; }
+    closeCtx();
+    panPtr = e.pointerId;
+    panOrigin = {px: e.clientX, py: e.clientY, tx0: tx, ty0: ty};
+    vp.classList.add('panning');
+  }
+}
+
+function onMove(e) {
+  ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+
+  // Pinch zoom
+  if (pinch && ptrs.size >= 2) {
+    const pts = [...ptrs.values()];
+    const d   = ptrDist(pts[0],pts[1]);
+    const mid = ptrMid(pts[0],pts[1]);
+    const ns  = Math.min(MAX_SC, Math.max(MIN_SC, pinch.sc0 * d / pinch.d0));
+    const ds  = ns - pinch.sc0;
+    const r   = vp.getBoundingClientRect();
+    const mx  = pinch.mid0.x - r.left;
+    const my  = pinch.mid0.y - r.top;
+    tx = pinch.tx0 - mx * ds / pinch.sc0 + (mid.x - pinch.mid0.x);
+    ty = pinch.ty0 - my * ds / pinch.sc0 + (mid.y - pinch.mid0.y);
+    sc = ns;
+    applyTx();
+    return;
+  }
+
+  // Pan
+  if (panPtr === e.pointerId && panOrigin) {
+    tx = panOrigin.tx0 + (e.clientX - panOrigin.px);
+    ty = panOrigin.ty0 + (e.clientY - panOrigin.py);
+    applyTx();
+  }
+
+  // Connection preview
+  if (connecting) {
+    const c  = nodeCenter(connecting.from);
+    const cp = screenToCanvas(e.clientX, e.clientY);
+    prevLine.setAttribute('d', bz(c.x,c.y,cp.x,cp.y));
+  }
+}
+
+function onUp(e) {
+  ptrs.delete(e.pointerId);
+  if (e.pointerId === panPtr) {
+    panPtr = null; panOrigin = null;
+    vp.classList.remove('panning');
+  }
+  if (ptrs.size < 2) pinch = null;
+}
+
+// Mouse wheel zoom
+vp.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r  = vp.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  // Clamp delta to avoid runaway trackpad acceleration
+  const delta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 50);
+  const f  = 1 - delta * 0.004;
+  const ns = Math.min(MAX_SC, Math.max(MIN_SC, sc * f));
+  tx -= mx * (ns - sc) / sc;
+  ty -= my * (ns - sc) / sc;
+  sc = ns;
+  applyTx();
+}, {passive: false});
+
+// Fit all
+function fitAll() {
+  if (!nodes.length) return;
+  const pad = 60;
+  const xs = nodes.map(n=>n.x), ys = nodes.map(n=>n.y);
+  const x0=Math.min(...xs), y0=Math.min(...ys);
+  const x1=Math.max(...xs)+180, y1=Math.max(...ys)+80;
+  const W=x1-x0, H=y1-y0;
+  const vW=vp.clientWidth-pad*2, vH=vp.clientHeight-pad*2;
+  sc = Math.min(MAX_SC, Math.max(MIN_SC, Math.min(vW/W, vH/H)));
+  tx = pad - x0*sc; ty = pad - y0*sc;
+  applyTx();
+}
+document.getElementById('fit-btn').addEventListener('click', fitAll);
+
+// ─── Zoom dropdown ──────────────────────────────────────────
+const zdrop = document.getElementById('zdrop');
+zbadge.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  // Mark current closest zoom level
+  zdrop.querySelectorAll('.zopt').forEach(opt => {
+    const z = opt.dataset.z;
+    opt.classList.toggle('cur', z !== 'fit' && Math.abs(parseFloat(z) - sc) < 0.05);
+  });
+  zdrop.classList.toggle('on');
+});
+zdrop.querySelectorAll('.zopt').forEach(opt => {
+  opt.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    zdrop.classList.remove('on');
+    if (opt.dataset.z === 'fit') { fitAll(); return; }
+    const target = parseFloat(opt.dataset.z);
+    // Zoom to centre of viewport
+    const cx = vp.clientWidth / 2, cy = vp.clientHeight / 2;
+    tx -= cx * (target - sc) / sc;
+    ty -= cy * (target - sc) / sc;
+    sc = target;
+    applyTx();
+  });
+});
+// Close dropdown on tap outside
+document.addEventListener('pointerdown', e => {
+  if (!zdrop.contains(e.target) && e.target !== zbadge) zdrop.classList.remove('on');
+}, true);
+
+// ─── Node state ─────────────────────────────────────────────
+let nodes=[], conns=[], nid=0, cid=0;
+let connecting=null, ctxTarget=null, editTarget=null;
+
+// SVG arrowhead colours per category (drawn inline, no defs needed)
+const ARR_COL = {
+  audio:  '#ff6b35', video:  '#00e5ff', compute:'#a78bfa',
+  network:'#a78bfa', camera: '#facc15', output: '#f472b6', def:'#3a4055',
+};
+
+const prevLine = document.createElementNS('http://www.w3.org/2000/svg','path');
+prevLine.classList.add('cprev');
+prevLine.style.display='none';
+svg.appendChild(prevLine);
+
+// ─── Catalogue + palette ────────────────────────────────────
+const CAT = [
+  {label:'Allen & Heath CQ12T',sub:'USB · BT · 12ch', c:'audio',   i:'🎛️'},
+  {label:'MacBook Air M2',     sub:'OBS · Karaoke',   c:'compute', i:'💻'},
+  {label:'DJI Osmo Action 4',  sub:'4K · HDMI out',   c:'camera',  i:'📷'},
+  {label:'Samsung S23 Ultra',  sub:'4K cam · hotspot',c:'camera',  i:'📱'},
+  {label:'OBS Studio',         sub:'Scene switcher',  c:'compute', i:'🎬'},
+  {label:'TikTok Live Studio', sub:'RTMP → TikTok',   c:'output',  i:'📡'},
+  {label:'Vocal Mic',          sub:'XLR',             c:'audio',   i:'🎤'},
+  {label:'Karaoke Player',     sub:'CDG+MP3',         c:'compute', i:'🎵'},
+  {label:'TV / Screen',        sub:'HDMI display',    c:'output',  i:'🖥️'},
+  {label:'Wireless Router',    sub:'LAN / Wi-Fi',     c:'network', i:'📶'},
+  {label:'HDMI Capture',       sub:'USB capture card',c:'video',   i:'🎥'},
+  {label:'IEM / Monitor',      sub:'Headphone out',   c:'audio',   i:'🎧'},
+  {label:'Speaker / PA',       sub:'Main out',        c:'audio',   i:'🔊'},
+  {label:'Custom Device',      sub:'—',              c:'audio',   i:'⬜'},
+];
+const dotCol = {audio:'#ff6b35',video:'#00e5ff',compute:'#7fff6e',
+                network:'#a78bfa',camera:'#facc15',output:'#f472b6'};
+
+const pgrid = document.getElementById('pgrid');
+CAT.forEach(d => {
+  const el = document.createElement('div');
+  el.className = 'pi-item';
+  el.innerHTML = `<span class="dot" style="background:${dotCol[d.c]||'#888'}"></span>
+                  <span>${d.i}</span><span>${d.label}</span>`;
+  el.addEventListener('pointerdown', ev => {
+    ev.stopPropagation();
+    pal.classList.remove('open');
+    const r = vp.getBoundingClientRect();
+    const cp = screenToCanvas(r.left+r.width/2, r.top+r.height/2);
+    addNode({...d, x:cp.x-85+(Math.random()-.5)*80, y:cp.y-40+(Math.random()-.5)*80});
+  });
+  pgrid.appendChild(el);
+});
+document.getElementById('ptog').addEventListener('pointerdown', ev => {
+  ev.stopPropagation();
+  pal.classList.toggle('open');
+});
+
+// ─── Add / render node ──────────────────────────────────────
+function addNode(o) {
+  const n = {id:nid++,x:o.x||200,y:o.y||200,
+             label:o.label||'Device',sub:o.sub||'—',c:o.c||'audio',i:o.i||'⬜',
+             img:o.img||null, imgH:o.imgH||120};
+  nodes.push(n);
+  renderNode(n);
+  return n;
+}
+
+function renderNode(n) {
+  document.getElementById('n'+n.id)?.remove();
+  const el = document.createElement('div');
+  el.className = 'node';
+  el.id = 'n'+n.id;
+  el.dataset.id = n.id;
+  el.dataset.c  = n.c;
+  el.style.left = n.x+'px';
+  el.style.top  = n.y+'px';
+  const imgHtml = n.img
+    ? `<div class="nimg-wrap" style="height:${n.imgH||120}px">
+         <img class="nimg" src="${n.img}" alt="">
+         <div class="nimg-handle" data-nid="${n.id}"></div>
+       </div>`
+    : '';
+  el.innerHTML = `
+    <div class="port pi" data-nid="${n.id}"></div>
+    <div class="port po" data-nid="${n.id}"></div>
+    <div class="nh"><span class="ni">${n.i}</span><span class="nl">${n.label}</span></div>
+    <div class="ns">${n.sub}</div>
+    ${imgHtml}`;
+  ic.appendChild(el);
+  bindNode(el, n);
+}
+
+function bindNode(el, n) {
+  let lt=null, moved=false, sx,sy,ox,oy;
+
+  el.addEventListener('pointerdown', e => {
+    if (e.target.classList.contains('port')) return;
+    if (e.target.classList.contains('nimg-handle')) return; // handled separately
+    e.stopPropagation();
+
+    // Complete connection
+    if (connecting && connecting.from !== n.id) { finishConn(n.id); return; }
+    if (connecting && connecting.from === n.id) { cancelConn(); return; }
+
+    moved=false; sx=e.clientX; sy=e.clientY; ox=n.x; oy=n.y;
+    el.setPointerCapture(e.pointerId);
+
+    lt = setTimeout(()=>{ if(!moved) showCtx(e.clientX, e.clientY, n.id); }, 500);
+
+    const mm = ev => {
+      const dx=ev.clientX-sx, dy=ev.clientY-sy;
+      if(!moved && (Math.abs(dx)>6||Math.abs(dy)>6)){moved=true;clearTimeout(lt);}
+      if(moved){
+        n.x = ox + dx/sc; n.y = oy + dy/sc;
+        el.style.left=n.x+'px'; el.style.top=n.y+'px';
+        renderConns();
+      }
+    };
+    const mu = () => {
+      clearTimeout(lt);
+      el.removeEventListener('pointermove',mm);
+      el.removeEventListener('pointerup',mu);
+      el.removeEventListener('pointercancel',mu);
+    };
+    el.addEventListener('pointermove',mm);
+    el.addEventListener('pointerup',mu);
+    el.addEventListener('pointercancel',mu);
+  });
+
+  el.querySelectorAll('.port').forEach(p => {
+    p.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      const nid2 = parseInt(p.dataset.nid);
+      if(connecting){
+        connecting.from!==nid2 ? finishConn(nid2) : cancelConn();
+      } else {
+        startConn(nid2);
+      }
+    });
+  });
+
+  // Image resize handle
+  const handle = el.querySelector('.nimg-handle');
+  if (handle) {
+    handle.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const wrap = el.querySelector('.nimg-wrap');
+      const startY = e.clientY;
+      const startH = n.imgH || 120;
+
+      const onMove = ev => {
+        const dy = (ev.clientY - startY) / sc;
+        n.imgH = Math.max(40, Math.round(startH + dy));
+        wrap.style.height = n.imgH + 'px';
+        renderConns(); // connections stay correct while resizing
+      };
+      const onUp = () => {
+        handle.removeEventListener('pointermove', onMove);
+        handle.removeEventListener('pointerup', onUp);
+        handle.removeEventListener('pointercancel', onUp);
+        scheduleAutoSave();
+      };
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onUp);
+      handle.addEventListener('pointercancel', onUp);
+    });
+  }
+}
+
+// ─── Connections ────────────────────────────────────────────
+function nodeCenter(id) {
+  const n = nodes.find(n=>n.id===id);
+  return n ? {x:n.x+90, y:n.y+40} : {x:0,y:0};
+}
+function bz(x1,y1,x2,y2){ const cx=(x1+x2)/2; return `M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}`; }
+
+function startConn(fid){
+  connecting={from:fid};
+  document.getElementById('n'+fid)?.classList.add('src');
+  prevLine.style.display='block';
+  chint.classList.add('on');
+}
+function finishConn(tid){
+  if(!connecting) return;
+  const fid=connecting.from;
+  if(fid!==tid && !conns.find(c=>(c.f===fid&&c.t===tid)||(c.f===tid&&c.t===fid))){
+    const fn=nodes.find(n=>n.id===fid);
+    conns.push({id:cid++,f:fid,t:tid,c:fn?.c||'audio'});
+  }
+  cancelConn(); renderConns();
+}
+function cancelConn(){
+  if(connecting) document.getElementById('n'+connecting.from)?.classList.remove('src');
+  connecting=null;
+  prevLine.setAttribute('d',''); prevLine.style.display='none';
+  chint.classList.remove('on');
+}
+
+let labelPathId = 0;
+function renderConns(){
+  svg.querySelectorAll('.cl,.ctxt').forEach(l=>l.remove());
+  conns.forEach(c=>{
+    const a=nodeCenter(c.f), b=nodeCenter(c.t);
+    const cat=c.c||'def';
+    const col=ARR_COL[cat]||ARR_COL.def;
+    const d=bz(a.x,a.y,b.x,b.y);
+    const mx=(a.x+b.x)/2;
+
+    function bzPt(t){
+      const u=1-t;
+      return {
+        x: u*u*u*a.x + 3*u*u*t*mx  + 3*u*t*t*mx  + t*t*t*b.x,
+        y: u*u*u*a.y + 3*u*u*t*a.y + 3*u*t*t*b.y + t*t*t*b.y
+      };
+    }
+
+    // Line — tap reverses, double-tap deletes
+    const line=document.createElementNS('http://www.w3.org/2000/svg','path');
+    line.setAttribute('d',d);
+    line.classList.add('cl',cat);
+    line.dataset.id=c.id;
+    let tapTimer=null;
+    line.addEventListener('pointerdown', e=>{
+      e.stopPropagation();
+      if(tapTimer){
+        // double-tap → delete
+        clearTimeout(tapTimer); tapTimer=null;
+        conns=conns.filter(x=>x.id!==c.id); renderConns();
+      } else {
+        tapTimer=setTimeout(()=>{
+          tapTimer=null;
+          // single tap → reverse direction
+          const idx=conns.findIndex(x=>x.id===c.id);
+          if(idx!==-1){ const tmp=conns[idx].f; conns[idx].f=conns[idx].t; conns[idx].t=tmp; }
+          renderConns(); scheduleAutoSave();
+        }, 280);
+      }
+    });
+    svg.insertBefore(line,prevLine);
+
+    // Chevrons — direction is f→t always (we swapped f/t to reverse)
+    [0.22, 0.45, 0.68].forEach(t=>{
+      const p0=bzPt(t), p1=bzPt(t+0.02);
+      const angle=Math.atan2(p1.y-p0.y, p1.x-p0.x)*180/Math.PI;
+      const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.classList.add('ctxt');
+      txt.setAttribute('x', p0.x);
+      txt.setAttribute('y', p0.y);
+      txt.setAttribute('transform',`rotate(${angle},${p0.x},${p0.y})`);
+      txt.setAttribute('fill', col);
+      txt.setAttribute('text-anchor','middle');
+      txt.setAttribute('dominant-baseline','middle');
+      txt.style.pointerEvents='none';
+      txt.textContent='›';
+      svg.insertBefore(txt,prevLine);
+    });
+  });
+}
+
+// ─── Context menu ───────────────────────────────────────────
+function showCtx(x,y,id){
+  ctxTarget=id;
+  ctx.style.left=Math.min(x,window.innerWidth-170)+'px';
+  ctx.style.top =Math.min(y,window.innerHeight-150)+'px';
+  ctx.classList.add('on');
+}
+function closeCtx(){ ctx.classList.remove('on'); ctxTarget=null; }
+
+document.getElementById('cdel').addEventListener('pointerdown',()=>{
+  if(ctxTarget==null) return;
+  nodes=nodes.filter(n=>n.id!==ctxTarget);
+  conns=conns.filter(c=>c.f!==ctxTarget&&c.t!==ctxTarget);
+  document.getElementById('n'+ctxTarget)?.remove();
+  renderConns(); closeCtx();
+});
+document.getElementById('cconn').addEventListener('pointerdown',()=>{
+  const id=ctxTarget; closeCtx(); startConn(id);
+});
+document.getElementById('cedit').addEventListener('pointerdown',()=>{
+  const id=ctxTarget; closeCtx(); openEdit(id);
+});
+// Close ctx on tap outside
+document.addEventListener('pointerdown', e=>{
+  if(!ctx.contains(e.target)) closeCtx();
+}, true);
+
+// ─── Icon picker ────────────────────────────────────────────
+const ICONS = [
+  '🎤','🎙️','🎚️','🎛️','🎵','🎬','🎧','🔊','🔈','🔇','🎼',
+  '💻','🖥️','📷','📡','📶','🔌','🖱️','📱','🎥','📻',
+  '🔋','💡','🔧','⚙️','🔲','⬜','📥','📤','🔗','🌐',
+  '🖧','📺','🎞️','📸','🎹','🥁','🎸','🎺','🎻','🪗',
+];
+let editIconSel = '⬜';
+const iconGrid = document.getElementById('icon-grid');
+ICONS.forEach(em => {
+  const b = document.createElement('button');
+  b.className = 'icon-opt';
+  b.textContent = em;
+  b.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    editIconSel = em;
+    iconGrid.querySelectorAll('.icon-opt').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel');
+  });
+  iconGrid.appendChild(b);
+});
+
+function setIconSel(em) {
+  editIconSel = em;
+  iconGrid.querySelectorAll('.icon-opt').forEach(b => {
+    b.classList.toggle('sel', b.textContent === em);
+  });
+}
+
+// ─── Edit modal ─────────────────────────────────────────────
+let editImgData = null; // base64 string or null during edit session
+
+function updateImgPreview(src) {
+  const prev = document.getElementById('img-preview');
+  const none = document.getElementById('img-none');
+  if (src) {
+    prev.src = src; prev.style.display='block'; none.style.display='none';
+  } else {
+    prev.src=''; prev.style.display='none'; none.style.display='flex';
+  }
+}
+
+function openEdit(id){
+  const n=nodes.find(n=>n.id===id); if(!n) return;
+  editTarget=id;
+  editImgData = n.img || null;
+  document.getElementById('elabel').value=n.label;
+  document.getElementById('esub').value=n.sub;
+  document.getElementById('ecat').value=n.c;
+  setIconSel(n.i || '⬜');
+  updateImgPreview(editImgData);
+  emod.classList.add('on');
+}
+
+document.getElementById('eimg-pick').addEventListener('pointerdown', e=>{
+  e.stopPropagation();
+  document.getElementById('img-file-input').click();
+});
+document.getElementById('img-file-input').addEventListener('change', e=>{
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    editImgData = ev.target.result;
+    updateImgPreview(editImgData);
+  };
+  reader.readAsDataURL(file);
+  e.target.value='';
+});
+document.getElementById('eimg-clear').addEventListener('pointerdown', e=>{
+  e.stopPropagation();
+  editImgData=null;
+  updateImgPreview(null);
+});
+
+document.getElementById('esave').addEventListener('pointerdown',()=>{
+  const n=nodes.find(n=>n.id===editTarget); if(!n) return;
+  n.label=document.getElementById('elabel').value||n.label;
+  n.sub  =document.getElementById('esub').value;
+  n.c    =document.getElementById('ecat').value;
+  n.i    =editIconSel;
+  n.img  =editImgData;
+  // preserve existing imgH, reset only if image changed from none→some
+  if (editImgData && !n.imgH) n.imgH = 120;
+  renderNode(n); renderConns();
+  emod.classList.remove('on'); editTarget=null; editImgData=null;
+});
+document.getElementById('ecanc').addEventListener('pointerdown',()=>{
+  emod.classList.remove('on'); editTarget=null; editImgData=null;
+});
+
+// ─── Clear ──────────────────────────────────────────────────
+function clearAll(){
+  nodes=[]; conns=[];
+  ic.querySelectorAll('.node').forEach(n=>n.remove());
+  renderConns();
+}
+document.getElementById('bclall').addEventListener('pointerdown', clearAll);
+document.getElementById('bclconn').addEventListener('pointerdown',()=>{ conns=[]; renderConns(); });
+
+// ─── Preset ─────────────────────────────────────────────────
+document.getElementById('bpreset').addEventListener('pointerdown', loadPreset);
+function loadPreset(){
+  clearAll();
+  const P=[
+    {id:0,  x:332.67,  y:132.14,  label:'Q Audio 1970HH ①', sub:'Wireless · singer 1',       c:'audio',   i:'🎤', imgH:40},
+    {id:1,  x:294.22,  y:245.69,  label:'Q Audio 1970HH ②', sub:'Wireless · singer 2',       c:'audio',   i:'🎤', imgH:40},
+    {id:2,  x:246.12,  y:440,     label:'SM58',               sub:'XLR · DJ/host mic',         c:'audio',   i:'🎤', imgH:42},
+    {id:3,  x:295.88,  y:574.33,  label:'AT2020',             sub:'XLR · crowd mic',           c:'audio',   i:'🎤', imgH:40},
+    {id:4,  x:525.85,  y:297.85,  label:'Allen & Heath CQ12T',sub:'12ch digital mixer',        c:'audio',   i:'🎛️', imgH:120},
+    {id:5,  x:861.56,  y:135.99,  label:'Karaoke Laptop',     sub:'Windows · OpenKJ',          c:'compute', i:'💻', imgH:67},
+    {id:6,  x:1093.06, y:139.35,  label:'OpenKJ',             sub:'Karaoke host software',     c:'compute', i:'🎵', imgH:51},
+    {id:7,  x:1334.22, y:143.93,  label:'OBS (karaoke)',      sub:'Overlays and effects',      c:'compute', i:'🎬', imgH:46},
+    {id:8,  x:1374.04, y:290.06,  label:'Venue Screens',      sub:'HDMI · lyrics display',    c:'output',  i:'🖥️', imgH:88},
+    {id:9,  x:814.67,  y:404.06,  label:'Traktor Audio 6 DJ', sub:'USB interface via 1/4" to RCA', c:'audio', i:'🔈', imgH:60},
+    {id:10, x:1067.11, y:355.82,  label:'MacBook Air M2',     sub:'Streaming laptop',          c:'compute', i:'💻', imgH:84},
+    {id:11, x:1111.10, y:557.82,  label:'Osmo Action 4 ①',   sub:'Webcam via USB',            c:'camera',  i:'📷', imgH:44},
+    {id:12, x:1222.53, y:622.66,  label:'Osmo Action 4 ②',   sub:'Webcam via USB',            c:'camera',  i:'📷', imgH:44},
+    {id:13, x:1430.92, y:491.33,  label:'TikTok Live Studio', sub:'Live Stream',               c:'output',  i:'📡', imgH:81},
+    {id:14, x:552.41,  y:598.64,  label:'House PA',           sub:'Main L/R XLR out',          c:'audio',   i:'🔊', imgH:56},
+    {id:15, x:812.75,  y:611.25,  label:'Headphones',         sub:'Monitor mix · CQ out',      c:'audio',   i:'🎧', imgH:40},
+  ];
+  // Preserve node IDs exactly so connections reference correctly
+  const idMap={};
+  P.forEach(p=>{ const n=addNode(p); idMap[p.id]=n.id; });
+  // Reset counters to match saved state
+  nid=16; cid=18;
+
+  [
+    {id:0,  f:0,  t:4,  c:'audio'},
+    {id:1,  f:1,  t:4,  c:'audio'},
+    {id:2,  f:2,  t:4,  c:'audio'},
+    {id:4,  f:5,  t:4,  c:'audio'},
+    {id:5,  f:10, t:4,  c:'audio'},
+    {id:6,  f:4,  t:5,  c:'audio'},
+    {id:7,  f:4,  t:9,  c:'audio'},
+    {id:8,  f:4,  t:14, c:'audio'},
+    {id:9,  f:4,  t:15, c:'audio'},
+    {id:10, f:5,  t:6,  c:'compute'},
+    {id:11, f:6,  t:7,  c:'compute'},
+    {id:12, f:7,  t:8,  c:'video'},
+    {id:13, f:9,  t:10, c:'audio'},
+    {id:14, f:11, t:10, c:'camera'},
+    {id:15, f:12, t:10, c:'camera'},
+    {id:16, f:10, t:13, c:'output'},
+    {id:17, f:3,  t:4,  c:'audio'},
+  ].forEach(c=>conns.push({id:c.id, f:idMap[c.f], t:idMap[c.t], c:c.c}));
+
+  // Restore viewport from saved state
+  tx=-110.40; ty=-183.21; sc=1.181;
+  renderConns();
+  applyTx();
+}
+
+// ─── Persistence ─────────────────────────────────────────────
+const LS_KEY = 'sigflow_v1';
+const saveBadge = document.getElementById('save-badge');
+let saveBadgeTimer = null;
+
+function getState() {
+  return {
+    nodes: nodes.map(n=>({id:n.id,x:n.x,y:n.y,label:n.label,sub:n.sub,c:n.c,i:n.i,img:n.img||null,imgH:n.imgH||120})),
+    conns: conns.map(c=>({id:c.id,f:c.f,t:c.t,c:c.c})),
+    nid, cid,
+    tx, ty, sc
+  };
+}
+
+function applyState(s) {
+  clearAll();
+  nid = s.nid ?? 0; cid = s.cid ?? 0;
+  tx  = s.tx  ?? 0; ty  = s.ty  ?? 0; sc = s.sc ?? 1;
+  s.nodes.forEach(n => { nodes.push(n); renderNode(n); });
+  s.conns.forEach(c => conns.push(c));
+  renderConns();
+  applyTx();
+}
+
+function flashSaved(msg='SAVED') {
+  saveBadge.textContent = msg;
+  saveBadge.classList.add('show');
+  clearTimeout(saveBadgeTimer);
+  saveBadgeTimer = setTimeout(()=>saveBadge.classList.remove('show'), 1800);
+}
+
+// Auto-save to localStorage whenever state changes
+function autoSave() {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(getState()));
+    flashSaved('AUTO-SAVED');
+  } catch(e) { console.warn('localStorage save failed', e); }
+}
+
+// Hook auto-save onto all mutating operations
+const _addNode     = addNode;
+const _finishConn  = finishConn;
+const _cancelConn  = cancelConn;
+const _clearAll    = clearAll;
+const _renderConns = renderConns;
+
+// Wrap renderConns to trigger auto-save after every structural change
+let _saveScheduled = false;
+function scheduleAutoSave() {
+  if (_saveScheduled) return;
+  _saveScheduled = true;
+  setTimeout(()=>{ _saveScheduled=false; autoSave(); }, 300);
+}
+
+// Patch: call scheduleAutoSave after any conn render (covers moves, adds, deletes)
+const origRenderConns = renderConns;
+// We override by redefining — simpler to just call it inline below
+
+// ↓ Download JSON
+document.getElementById('bsave').addEventListener('pointerdown', () => {
+  const json = JSON.stringify(getState(), null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'sigflow-rig.json'; a.click();
+  URL.revokeObjectURL(url);
+  flashSaved('DOWNLOADED');
+});
+
+// ↑ Load JSON from file
+document.getElementById('bload').addEventListener('pointerdown', () => {
+  document.getElementById('file-input').click();
+});
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const s = JSON.parse(ev.target.result);
+      applyState(s);
+      fitAll();
+      flashSaved('LOADED ✓');
+      autoSave();
+    } catch(err) { alert('Invalid JSON file'); }
+  };
+  reader.readAsText(file);
+  e.target.value = ''; // reset so same file can be re-loaded
+});
+
+// ─── Auto-save observer ──────────────────────────────────────
+const mo = new MutationObserver(() => scheduleAutoSave());
+mo.observe(ic, {subtree:true, attributeFilter:['style'], childList:true});
+mo.observe(svg, {childList:true});
+
+// ─── Export (PNG + PDF) ──────────────────────────────────────
+// UI chrome to hide during export — legend (#legend) intentionally NOT in this list
+const HIDE_SELS = ['#fit-btn','#zbadge','#pal','#save-badge','#update-banner','#chint','header'];
+
+async function loadLib(url) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = url; s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+}
+
+async function renderToCanvas() {
+  if (!window.html2canvas)
+    await loadLib('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+
+  // Hide chrome; #legend stays visible so it appears in the export
+  HIDE_SELS.forEach(sel => { const el=document.querySelector(sel); if(el) el.style.visibility='hidden'; });
+
+  // html2canvas ignores object-fit:contain and stretches images to fill their element box.
+  // Work around: compute the correct contained size manually and apply it before capture.
+  const imgOverrides = [];
+  document.querySelectorAll('.nimg-wrap').forEach(wrap => {
+    const img = wrap.querySelector('.nimg');
+    if (!img) return;
+    const prevW  = img.style.width;
+    const prevH  = img.style.height;
+    const prevOF = wrap.style.overflow;
+    // Natural image dimensions
+    const nW = img.naturalWidth  || img.width  || 1;
+    const nH = img.naturalHeight || img.height || 1;
+    // Available box dimensions
+    const boxW = wrap.clientWidth  || 180;
+    const boxH = wrap.clientHeight || 120;
+    // Scale to contain within box (same logic as object-fit:contain)
+    const scale = Math.min(boxW / nW, boxH / nH);
+    const fitW  = Math.round(nW * scale);
+    const fitH  = Math.round(nH * scale);
+    img.style.width     = fitW + 'px';
+    img.style.height    = fitH + 'px';
+    wrap.style.overflow = 'hidden';
+    imgOverrides.push({ img, wrap, prevW, prevH, prevOF });
+  });
+
+  let cvs;
+  try {
+    const vpR = vp.getBoundingClientRect();
+    cvs = await html2canvas(document.body, {
+      backgroundColor: '#0d0f14', scale: 2, useCORS: true, allowTaint: true, logging: false,
+      x: vpR.left, y: vpR.top,
+      width: vpR.width, height: vpR.height,
+      windowWidth: window.innerWidth, windowHeight: window.innerHeight
+    });
+  } finally {
+    imgOverrides.forEach(({ img, wrap, prevW, prevH, prevOF }) => {
+      img.style.width     = prevW;
+      img.style.height    = prevH;
+      wrap.style.overflow = prevOF;
+    });
+    HIDE_SELS.forEach(sel => { const el=document.querySelector(sel); if(el) el.style.visibility=''; });
+  }
+  return cvs;
+}
+
+document.getElementById('bpng').addEventListener('pointerdown', async () => {
+  flashSaved('RENDERING…');
+  try {
+    fitAll();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cvs = await renderToCanvas();
+    const a = document.createElement('a');
+    a.download = 'sigflow-rig.png';
+    a.href = cvs.toDataURL('image/png');
+    a.click();
+    flashSaved('PNG SAVED');
+  } catch(e) { alert('PNG export failed: ' + e.message); }
+});
+
+document.getElementById('bpdf').addEventListener('pointerdown', async () => {
+  flashSaved('RENDERING…');
+  try {
+    if (!window.jspdf)
+      await loadLib('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    fitAll();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cvs  = await renderToCanvas();
+    const imgData = cvs.toDataURL('image/png');
+    // Landscape A3 for a nice wide diagram
+    const { jsPDF } = window.jspdf;
+    const pdf  = new jsPDF({ orientation:'landscape', unit:'mm', format:'a3' });
+    const pW   = pdf.internal.pageSize.getWidth();
+    const pH   = pdf.internal.pageSize.getHeight();
+    // Scale image to fit page preserving aspect ratio
+    const ratio = Math.min(pW / cvs.width, pH / cvs.height);
+    const iW = cvs.width  * ratio;
+    const iH = cvs.height * ratio;
+    const x  = (pW - iW) / 2;
+    const y  = (pH - iH) / 2;
+    pdf.addImage(imgData, 'PNG', x, y, iW, iH);
+    pdf.save('sigflow-rig.pdf');
+    flashSaved('PDF SAVED');
+  } catch(e) { alert('PDF export failed: ' + e.message); }
+});
+
+// ─── Update banner ───────────────────────────────────────────
+const updateBanner = document.getElementById('update-banner');
+let pendingRemoteState = null;
+
+document.getElementById('update-yes').addEventListener('pointerdown', () => {
+  if (!pendingRemoteState) return;
+  applyState(pendingRemoteState);
+  autoSave();
+  updateBanner.classList.remove('show');
+  flashSaved('UPDATED ✓');
+});
+document.getElementById('update-no').addEventListener('pointerdown', () => {
+  updateBanner.classList.remove('show');
+});
+
+// ─── Boot ────────────────────────────────────────────────────
+window.addEventListener('resize', drawGrid);
+window.addEventListener('load', async () => {
+  applyTx();
+
+  // 1. Try localStorage first
+  let localState = null;
+  try {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) {
+      const s = JSON.parse(saved);
+      if (s.nodes && s.nodes.length > 0) localState = s;
+    }
+  } catch(e) {}
+
+  // 2. Fetch default-rig.json from repo (fails gracefully if not present)
+  let remoteState = null;
+  try {
+    const res = await fetch('./default-rig.json', {cache: 'no-cache'});
+    if (res.ok) remoteState = await res.json();
+  } catch(e) {}
+
+  if (localState) {
+    // User has their own saved state — load it
+    applyState(localState);
+    flashSaved('RESTORED');
+    // Check if remote is newer
+    if (remoteState && remoteState.version && localState.version !== remoteState.version) {
+      pendingRemoteState = remoteState;
+      document.getElementById('update-msg').textContent =
+        `Author updated the rig (v${remoteState.version}) — load it?`;
+      updateBanner.classList.add('show');
+    }
+  } else if (remoteState) {
+    // No local state — load from repo
+    applyState(remoteState);
+    autoSave();
+    flashSaved('LOADED FROM REPO');
+  } else {
+    // Fallback to hardcoded preset
+    loadPreset();
+  }
+});
+
+</script>
+</body>
+</html>
